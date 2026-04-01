@@ -1,0 +1,48 @@
+import yfinance as yf
+import pandas as pd
+import ta
+import plotly.graph_objects as go
+import streamlit as st
+
+st.title("Futures Chart Analyzer")
+
+symbol = st.selectbox("Select Symbol", ["GC=F", "SI=F", "CL=F", "^IXIC"])
+interval = st.selectbox("Select Interval", ["1m", "5m", "15m"])
+period = st.text_input("Data Period (ex: 7d, 30d)", "7d")
+
+st.write(f"Fetching {symbol} data...")
+
+# Fetch data
+data = yf.download(symbol, interval=interval, period=period)
+data = data.dropna()
+
+# Indicators
+data['vwap'] = (data['Volume'] * (data['High'] + data['Low'] + data['Close'])/3).cumsum() / data['Volume'].cumsum()
+data['sma_vol'] = data['Volume'].rolling(20).mean()
+swing_len = 50
+data['swing_high'] = data['High'].rolling(swing_len).max()
+data['swing_low'] = data['Low'].rolling(swing_len).min()
+data['fib50'] = data['swing_low'] + 0.5*(data['swing_high'] - data['swing_low'])
+data['fib618'] = data['swing_low'] + 0.618*(data['swing_high'] - data['swing_low'])
+
+# Signals
+data['bull_signal'] = (data['Close'] > data['vwap']) & (data['Volume'] > data['sma_vol']) & (data['Close'] > data['Open'])
+data['bear_signal'] = (data['Close'] < data['vwap']) & (data['Volume'] > data['sma_vol']) & (data['Close'] < data['Open'])
+
+# Targets
+data['tp1'] = data['swing_high']
+data['tp2'] = data['Close'] + (data['Close'] - data['swing_low'])*1.272
+data['stop'] = data['swing_low']
+
+# Plot
+fig = go.Figure()
+fig.add_trace(go.Candlestick(x=data.index, open=data['Open'], high=data['High'], low=data['Low'], close=data['Close'], name="Price"))
+fig.add_trace(go.Scatter(x=data.index, y=data['vwap'], line=dict(color='orange', width=2), name="VWAP"))
+fig.add_trace(go.Scatter(x=data.index[data['bull_signal']], y=data['Close'][data['bull_signal']], mode='markers', marker=dict(color='green', size=10), name="BUY Signal"))
+fig.add_trace(go.Scatter(x=data.index[data['bear_signal']], y=data['Close'][data['bear_signal']], mode='markers', marker=dict(color='red', size=10), name="SELL Signal"))
+fig.add_trace(go.Scatter(x=data.index, y=data['tp1'], line=dict(color='green', width=1, dash='dash'), name="TP1"))
+fig.add_trace(go.Scatter(x=data.index, y=data['tp2'], line=dict(color='green', width=1, dash='dot'), name="TP2"))
+fig.add_trace(go.Scatter(x=data.index, y=data['stop'], line=dict(color='red', width=1, dash='dot'), name="Stop"))
+
+fig.update_layout(title=f"{symbol} Analysis", xaxis_title="Time", yaxis_title="Price", template="plotly_dark")
+st.plotly_chart(fig, use_container_width=True)
